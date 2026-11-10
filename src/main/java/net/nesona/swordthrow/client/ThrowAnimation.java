@@ -3,13 +3,63 @@ package net.nesona.swordthrow.client;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.MathHelper;
 
+/**
+ * Keyframed first-person arm animation (hand pose + camera + FOV).
+ * Pose = {tx, ty, tz, rotX, rotY, rotZ}; rotations pivot around the shoulder (see HeldItemRendererMixin).
+ */
 public final class ThrowAnimation {
     public enum Type { NONE, THROW, PULL }
 
-    public static final int THROW_LENGTH = 12;
-    public static final int PULL_LENGTH = 9;
-    public static final int RELEASE_TICK = 4;
-    public static final float RELEASE_T = 0.35f;
+    public static final int THROW_LENGTH = 14;
+    public static final int PULL_LENGTH = 10;
+    /** Tick at which the sword leaves the hand and the throw packet is sent. */
+    public static final int RELEASE_TICK = 8;
+    public static final float RELEASE_T = RELEASE_TICK / (float) THROW_LENGTH;
+
+    private enum Ease { LINEAR, IN, OUT, IN_OUT }
+
+    private record Key(float t, float tx, float ty, float tz, float rx, float ry, float rz, Ease ease) {}
+
+    private record CamKey(float t, float v, Ease ease) {}
+
+    private static final Key[] THROW_KEYS = {
+            new Key(0.00f,  0.00f,  0.00f,  0.00f,   0f,   0f,   0f, Ease.LINEAR),
+            new Key(0.10f, -0.04f, -0.10f,  0.06f, -10f,   0f,  -5f, Ease.OUT),    // anticipation dip
+            new Key(0.40f,  0.08f, -0.02f,  0.28f,  52f, -16f,  12f, Ease.IN_OUT), // raise and cock back
+            new Key(0.48f,  0.10f,  0.00f,  0.34f,  58f, -20f,  15f, Ease.LINEAR), // coil / hold
+            new Key(0.59f, -0.04f, -0.06f, -0.50f, -14f,   8f,  -6f, Ease.IN),     // snap forward (release)
+            new Key(0.74f, -0.08f, -0.22f, -0.55f, -42f,  12f, -10f, Ease.OUT),    // follow-through
+            new Key(1.00f,  0.00f,  0.00f,  0.00f,   0f,   0f,   0f, Ease.IN_OUT) // recover
+    };
+
+    private static final Key[] PULL_KEYS = {
+            new Key(0.00f,  0.00f,  0.00f,  0.00f,   0f,  0f,   0f, Ease.LINEAR),
+            new Key(0.30f,  0.05f,  0.12f,  0.45f,  28f,  0f, -12f, Ease.OUT),    // grab and heave
+            new Key(0.50f,  0.00f,  0.05f,  0.55f,  32f,  0f, -14f, Ease.LINEAR), // strain
+            new Key(0.70f, -0.05f, -0.05f,  0.00f,  -6f,  4f,   2f, Ease.IN),     // sword pops free
+            new Key(1.00f,  0.00f,  0.00f,  0.00f,   0f,  0f,   0f, Ease.IN_OUT)
+    };
+
+    private static final CamKey[] THROW_PITCH = {
+            new CamKey(0.00f, 0f, Ease.LINEAR), new CamKey(0.40f, -3f, Ease.IN_OUT),
+            new CamKey(0.50f, -4f, Ease.LINEAR), new CamKey(0.64f, 6f, Ease.IN),
+            new CamKey(0.80f, 2f, Ease.OUT), new CamKey(1.00f, 0f, Ease.IN_OUT)
+    };
+    private static final CamKey[] THROW_FOV = {
+            new CamKey(0.00f, 0f, Ease.LINEAR), new CamKey(0.40f, -6f, Ease.IN_OUT),
+            new CamKey(0.50f, -7f, Ease.LINEAR), new CamKey(0.64f, 9f, Ease.IN),
+            new CamKey(0.85f, 2f, Ease.OUT), new CamKey(1.00f, 0f, Ease.IN_OUT)
+    };
+    private static final CamKey[] PULL_PITCH = {
+            new CamKey(0.00f, 0f, Ease.LINEAR), new CamKey(0.45f, -3f, Ease.OUT),
+            new CamKey(0.70f, 3f, Ease.IN), new CamKey(1.00f, 0f, Ease.IN_OUT)
+    };
+    private static final CamKey[] PULL_FOV = {
+            new CamKey(0.00f, 0f, Ease.LINEAR), new CamKey(0.45f, -3f, Ease.OUT),
+            new CamKey(0.70f, 5f, Ease.IN), new CamKey(1.00f, 0f, Ease.IN_OUT)
+    };
+
+    private static final float[] ZERO = new float[6];
 
     private static Type type = Type.NONE;
     private static int ticks, prevTicks;
@@ -64,27 +114,57 @@ public final class ThrowAnimation {
         return MathHelper.clamp(MathHelper.lerp(tickDelta, prevTicks, ticks) / length(), 0f, 1f);
     }
 
+    /** {tx, ty, tz, rotX, rotY, rotZ} for the current frame. */
+    public static float[] handPose(float tickDelta) {
+        if (type == Type.NONE) return ZERO;
+        return samplePose(type == Type.THROW ? THROW_KEYS : PULL_KEYS, progress(tickDelta));
+    }
+
     /** Camera pitch offset in degrees (negative = look up). */
     public static float cameraPitch(float tickDelta) {
         if (type == Type.NONE) return 0f;
-        float t = progress(tickDelta);
-        if (type == Type.THROW) {
-            if (t < RELEASE_T) return -4f * (t / RELEASE_T);
-            float v = (t - RELEASE_T) / (1f - RELEASE_T);
-            return MathHelper.lerp(v, -4f, 0f) + 7f * MathHelper.sin((float) Math.PI * v);
-        }
-        return -3f * MathHelper.sin((float) Math.PI * t);
+        return sampleCam(type == Type.THROW ? THROW_PITCH : PULL_PITCH, progress(tickDelta));
     }
 
-    /** FOV offset in degrees: zoom in on wind-up, punch out on release. */
     public static float fovOffset(float tickDelta) {
         if (type == Type.NONE) return 0f;
-        float t = progress(tickDelta);
-        if (type == Type.THROW) {
-            if (t < RELEASE_T) return -5f * (t / RELEASE_T);
-            float v = (t - RELEASE_T) / (1f - RELEASE_T);
-            return MathHelper.lerp(v, -5f, 0f) + 10f * MathHelper.sin((float) Math.PI * v);
+        return sampleCam(type == Type.THROW ? THROW_FOV : PULL_FOV, progress(tickDelta));
+    }
+
+    private static float ease(Ease e, float u) {
+        return switch (e) {
+            case LINEAR -> u;
+            case IN -> u * u;
+            case OUT -> 1f - (1f - u) * (1f - u);
+            case IN_OUT -> u * u * (3f - 2f * u);
+        };
+    }
+
+    private static float[] samplePose(Key[] keys, float t) {
+        for (int i = 1; i < keys.length; i++) {
+            Key a = keys[i - 1], b = keys[i];
+            if (t <= b.t || i == keys.length - 1) {
+                float span = b.t - a.t;
+                float u = span <= 0f ? 1f : MathHelper.clamp((t - a.t) / span, 0f, 1f);
+                u = ease(b.ease, u);
+                return new float[] {
+                        MathHelper.lerp(u, a.tx, b.tx), MathHelper.lerp(u, a.ty, b.ty), MathHelper.lerp(u, a.tz, b.tz),
+                        MathHelper.lerp(u, a.rx, b.rx), MathHelper.lerp(u, a.ry, b.ry), MathHelper.lerp(u, a.rz, b.rz)
+                };
+            }
         }
-        return 4f * MathHelper.sin((float) Math.PI * t);
+        return ZERO;
+    }
+
+    private static float sampleCam(CamKey[] keys, float t) {
+        for (int i = 1; i < keys.length; i++) {
+            CamKey a = keys[i - 1], b = keys[i];
+            if (t <= b.t || i == keys.length - 1) {
+                float span = b.t - a.t;
+                float u = span <= 0f ? 1f : MathHelper.clamp((t - a.t) / span, 0f, 1f);
+                return MathHelper.lerp(ease(b.ease, u), a.v, b.v);
+            }
+        }
+        return 0f;
     }
 }
