@@ -1,12 +1,10 @@
 package net.nesona.swordthrow;
 
-import com.google.common.collect.Multimap;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.AttributeModifiersComponent;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
-import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.attribute.EntityAttribute;
-import net.minecraft.entity.attribute.EntityAttributeModifier;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.data.DataTracker;
@@ -15,6 +13,7 @@ import net.minecraft.entity.data.TrackedDataHandlerRegistry;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.PersistentProjectileEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.ActionResult;
@@ -36,17 +35,17 @@ public class ThrownSwordEntity extends PersistentProjectileEntity {
     }
 
     public ThrownSwordEntity(World world, LivingEntity owner, ItemStack stack, boolean creative) {
-        super(SwordThrowMod.THROWN_SWORD, owner, world);
+        super(SwordThrowMod.THROWN_SWORD, owner, world, stack, null);
         this.setSound(SoundEvents.ITEM_TRIDENT_HIT_GROUND);
         this.setSwordStack(stack);
         this.creativeThrow = creative;
     }
 
     @Override
-    protected void initDataTracker() {
-        super.initDataTracker();
-        this.dataTracker.startTracking(STACK, ItemStack.EMPTY);
-        this.dataTracker.startTracking(STUCK, false);
+    protected void initDataTracker(DataTracker.Builder builder) {
+        super.initDataTracker(builder);
+        builder.add(STACK, ItemStack.EMPTY);
+        builder.add(STUCK, false);
     }
 
     public ItemStack getSwordStack() {
@@ -73,10 +72,12 @@ public class ThrownSwordEntity extends PersistentProjectileEntity {
     protected void onEntityHit(EntityHitResult result) {
         Entity target = result.getEntity();
         float dmg = 1.0f;
-        Multimap<EntityAttribute, EntityAttributeModifier> mods =
-                getSwordStack().getAttributeModifiers(EquipmentSlot.MAINHAND);
-        for (EntityAttributeModifier m : mods.get(EntityAttributes.GENERIC_ATTACK_DAMAGE)) {
-            dmg += (float) m.getValue();
+        AttributeModifiersComponent comp = getSwordStack()
+                .getOrDefault(DataComponentTypes.ATTRIBUTE_MODIFIERS, AttributeModifiersComponent.DEFAULT);
+        for (AttributeModifiersComponent.Entry en : comp.modifiers()) {
+            if (en.attribute().equals(EntityAttributes.GENERIC_ATTACK_DAMAGE)) {
+                dmg += (float) en.modifier().value();
+            }
         }
         Entity owner = this.getOwner();
         DamageSource src = this.getDamageSources().thrown(this, owner == null ? this : owner);
@@ -84,9 +85,12 @@ public class ThrownSwordEntity extends PersistentProjectileEntity {
 
         if (!this.getWorld().isClient) {
             ItemStack s = getSwordStack().copy();
-            if (s.damage(1, this.random, null)) {
-                this.discard();
-                return;
+            if (s.isDamageable()) {
+                s.setDamage(s.getDamage() + 1);
+                if (s.getDamage() >= s.getMaxDamage()) {
+                    this.discard();
+                    return;
+                }
             }
             setSwordStack(s);
         }
@@ -129,21 +133,26 @@ public class ThrownSwordEntity extends PersistentProjectileEntity {
     public void onPlayerCollision(PlayerEntity player) {}
 
     @Override
-    protected ItemStack asItemStack() {
-        return getSwordStack().copy();
+    protected ItemStack getDefaultItemStack() {
+        return new ItemStack(Items.IRON_SWORD);
     }
 
     @Override
     public void writeCustomDataToNbt(NbtCompound nbt) {
         super.writeCustomDataToNbt(nbt);
-        nbt.put("Sword", getSwordStack().writeNbt(new NbtCompound()));
+        nbt.put("Sword", getSwordStack().encode(this.getRegistryManager()));
         nbt.putBoolean("CreativeThrow", creativeThrow);
     }
 
     @Override
     public void readCustomDataFromNbt(NbtCompound nbt) {
         super.readCustomDataFromNbt(nbt);
-        setSwordStack(ItemStack.fromNbt(nbt.getCompound("Sword")));
+        ItemStack fallback = getItemStack().copy();
+        if (nbt.contains("Sword")) {
+            setSwordStack(ItemStack.fromNbt(this.getRegistryManager(), nbt.get("Sword")).orElse(fallback));
+        } else {
+            setSwordStack(fallback);
+        }
         creativeThrow = nbt.getBoolean("CreativeThrow");
     }
 }
