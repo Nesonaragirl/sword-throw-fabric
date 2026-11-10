@@ -1,6 +1,7 @@
 package net.nesona.swordthrow;
 
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricEntityTypeBuilder;
 import net.minecraft.entity.EntityDimensions;
@@ -19,11 +20,10 @@ import net.minecraft.world.World;
 
 public class SwordThrowMod implements ModInitializer {
     public static final String MOD_ID = "swordthrow";
-    public static final Identifier THROW_PACKET = new Identifier(MOD_ID, "throw");
 
     public static final EntityType<ThrownSwordEntity> THROWN_SWORD = Registry.register(
             Registries.ENTITY_TYPE,
-            new Identifier(MOD_ID, "thrown_sword"),
+            Identifier.of(MOD_ID, "thrown_sword"),
             FabricEntityTypeBuilder.<ThrownSwordEntity>create(SpawnGroup.MISC, ThrownSwordEntity::new)
                     .dimensions(EntityDimensions.fixed(0.5f, 0.5f))
                     .trackRangeBlocks(4)
@@ -35,8 +35,9 @@ public class SwordThrowMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        ServerPlayNetworking.registerGlobalReceiver(THROW_PACKET,
-                (server, player, handler, buf, sender) -> server.execute(() -> throwSword(player)));
+        PayloadTypeRegistry.playC2S().register(ThrowPayload.ID, ThrowPayload.CODEC);
+        ServerPlayNetworking.registerGlobalReceiver(ThrowPayload.ID,
+                (payload, context) -> throwSword(context.player()));
     }
 
     private static void throwSword(ServerPlayerEntity p) {
