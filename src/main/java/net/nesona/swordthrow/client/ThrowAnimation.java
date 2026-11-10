@@ -1,5 +1,6 @@
 package net.nesona.swordthrow.client;
 
+import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.MathHelper;
 
 public final class ThrowAnimation {
@@ -7,6 +8,7 @@ public final class ThrowAnimation {
 
     private static Type type = Type.NONE;
     private static int ticks, prevTicks;
+    private static ItemStack stack = ItemStack.EMPTY;
 
     private ThrowAnimation() {}
 
@@ -15,7 +17,13 @@ public final class ThrowAnimation {
     }
 
     public static void start(Type t) {
+        start(t, ItemStack.EMPTY);
+    }
+
+    /** @param held the item shown in hand during the animation (the sword being thrown). */
+    public static void start(Type t, ItemStack held) {
         type = t;
+        stack = held;
         ticks = 0;
         prevTicks = 0;
     }
@@ -24,11 +32,18 @@ public final class ThrowAnimation {
         if (type == Type.NONE) return;
         prevTicks = ticks;
         ticks++;
-        if (ticks > length()) type = Type.NONE;
+        if (ticks > length()) {
+            type = Type.NONE;
+            stack = ItemStack.EMPTY;
+        }
     }
 
     public static Type type() {
         return type;
+    }
+
+    public static ItemStack heldStack() {
+        return stack;
     }
 
     /** 0..1 progress of the running animation. */
