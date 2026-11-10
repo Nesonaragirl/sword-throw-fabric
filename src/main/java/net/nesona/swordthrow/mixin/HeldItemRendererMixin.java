@@ -6,19 +6,26 @@ import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.item.HeldItemRenderer;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.Arm;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.RotationAxis;
 import net.nesona.swordthrow.client.ThrowAnimation;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(HeldItemRenderer.class)
-public class HeldItemRendererMixin {
+public abstract class HeldItemRendererMixin {
     // Approximate shoulder position in camera space; the arm swings around this point.
     private static final double PX = 0.5, PY = -0.55, PZ = 0.1;
+
+    /** Vanilla's bare-arm renderer (normally only used when the hand is empty). */
+    @Shadow
+    protected abstract void renderArmHoldingItem(MatrixStack matrices, VertexConsumerProvider vertexConsumers,
+                                                 int light, float equipProgress, float swingProgress, Arm arm);
 
     /** Keep the sword in hand until the release frame, even if the stack was already consumed. */
     @ModifyVariable(method = "renderFirstPersonItem", at = @At("HEAD"), argsOnly = true)
@@ -31,6 +38,22 @@ public class HeldItemRendererMixin {
             }
         }
         return item;
+    }
+
+    /**
+     * Vanilla draws only the item (no arm) when you hold a sword. While the throw/pull animation
+     * runs, draw the arm too so the animation is visible. When the hand is empty vanilla already
+     * draws the arm, so skip it then.
+     */
+    @Inject(method = "renderFirstPersonItem", at = @At("RETURN"))
+    private void swordthrow$drawArm(AbstractClientPlayerEntity player, float tickDelta, float pitch, Hand hand,
+                                    float swingProgress, ItemStack item, float equipProgress, MatrixStack matrices,
+                                    VertexConsumerProvider vcp, int light, CallbackInfo ci) {
+        if (hand != Hand.MAIN_HAND || item.isEmpty() || player.isInvisible()) return;
+        if (ThrowAnimation.type() == ThrowAnimation.Type.NONE) return;
+        matrices.push();
+        this.renderArmHoldingItem(matrices, vcp, light, equipProgress, swingProgress, player.getMainArm());
+        matrices.pop();
     }
 
     /** Whole-arm keyframed motion, applied around the hand/arm/item render. */
