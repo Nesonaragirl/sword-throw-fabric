@@ -15,6 +15,7 @@ import net.minecraft.entity.projectile.PersistentProjectileEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.particle.ParticleTypes;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
@@ -28,6 +29,7 @@ public class ThrownSwordEntity extends PersistentProjectileEntity {
             DataTracker.registerData(ThrownSwordEntity.class, TrackedDataHandlerRegistry.BOOLEAN);
 
     private boolean creativeThrow;
+    private boolean wasStuck;
 
     public ThrownSwordEntity(EntityType<? extends ThrownSwordEntity> type, World world) {
         super(type, world);
@@ -65,6 +67,21 @@ public class ThrownSwordEntity extends PersistentProjectileEntity {
         super.tick();
         if (!this.getWorld().isClient) {
             this.dataTracker.set(STUCK, this.inGround);
+        } else {
+            boolean stuck = isStuck();
+            if (!stuck) {
+                // flight trail
+                this.getWorld().addParticle(ParticleTypes.CRIT, getX(), getY(), getZ(), 0, 0, 0);
+            } else if (!wasStuck) {
+                // impact burst
+                for (int i = 0; i < 10; i++) {
+                    this.getWorld().addParticle(ParticleTypes.ENCHANTED_HIT, getX(), getY(), getZ(),
+                            (random.nextDouble() - 0.5) * 0.4,
+                            random.nextDouble() * 0.3,
+                            (random.nextDouble() - 0.5) * 0.4);
+                }
+            }
+            wasStuck = stuck;
         }
     }
 
