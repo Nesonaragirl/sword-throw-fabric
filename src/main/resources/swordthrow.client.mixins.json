@@ -2,6 +2,6 @@
   "required": true,
   "package": "net.nesona.swordthrow.mixin",
   "compatibilityLevel": "JAVA_21",
-  "client": ["HeldItemRendererMixin"],
+  "client": ["HeldItemRendererMixin", "ClientPlayerInteractionManagerMixin"],
   "injectors": { "defaultRequire": 1 }
 }
