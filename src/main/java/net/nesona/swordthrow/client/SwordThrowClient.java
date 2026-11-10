@@ -30,7 +30,7 @@ public class SwordThrowClient implements ClientModInitializer {
                 ItemStack s = p.getMainHandStack();
                 if (s.getItem() instanceof SwordItem && !p.getItemCooldownManager().isCoolingDown(s.getItem())) {
                     ClientPlayNetworking.send(new ThrowPayload());
-                    ThrowAnimation.start(ThrowAnimation.Type.THROW);
+                    ThrowAnimation.start(ThrowAnimation.Type.THROW, s.copy());
                 }
             }
             ThrowAnimation.tick();
