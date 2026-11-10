@@ -4,8 +4,8 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.util.math.MathHelper;
 
 /**
- * Keyframed first-person arm animation (hand pose + camera + FOV).
- * Pose = {tx, ty, tz, rotX, rotY, rotZ}; rotations pivot around the shoulder (see HeldItemRendererMixin).
+ * Keyframed first-person animation for our own custom arm rig (see FirstPersonRig).
+ * Pose = {shoulderTx, ty, tz, shoulderPitch, yaw, roll, elbow} (degrees; elbow is absolute, 0 = straight).
  */
 public final class ThrowAnimation {
     public enum Type { NONE, THROW, PULL }
@@ -15,29 +15,30 @@ public final class ThrowAnimation {
     /** Tick at which the sword leaves the hand and the throw packet is sent. */
     public static final int RELEASE_TICK = 8;
     public static final float RELEASE_T = RELEASE_TICK / (float) THROW_LENGTH;
+    public static final float REST_ELBOW = 30f;
 
     private enum Ease { LINEAR, IN, OUT, IN_OUT }
 
-    private record Key(float t, float tx, float ty, float tz, float rx, float ry, float rz, Ease ease) {}
+    private record Key(float t, float tx, float ty, float tz, float rx, float ry, float rz, float elbow, Ease ease) {}
 
     private record CamKey(float t, float v, Ease ease) {}
 
     private static final Key[] THROW_KEYS = {
-            new Key(0.00f,  0.00f,  0.00f,  0.00f,   0f,   0f,   0f, Ease.LINEAR),
-            new Key(0.10f, -0.04f, -0.10f,  0.06f, -10f,   0f,  -5f, Ease.OUT),    // anticipation dip
-            new Key(0.40f,  0.08f, -0.02f,  0.28f,  52f, -16f,  12f, Ease.IN_OUT), // raise and cock back
-            new Key(0.48f,  0.10f,  0.00f,  0.34f,  58f, -20f,  15f, Ease.LINEAR), // coil / hold
-            new Key(0.59f, -0.04f, -0.06f, -0.50f, -14f,   8f,  -6f, Ease.IN),     // snap forward (release)
-            new Key(0.74f, -0.08f, -0.22f, -0.55f, -42f,  12f, -10f, Ease.OUT),    // follow-through
-            new Key(1.00f,  0.00f,  0.00f,  0.00f,   0f,   0f,   0f, Ease.IN_OUT) // recover
+            new Key(0.00f,  0.00f,  0.00f,  0.00f,   0f,   0f,  0f, 30f, Ease.LINEAR),
+            new Key(0.10f,  0.00f, -0.04f,  0.04f,  -6f,   4f,  0f, 38f, Ease.OUT),    // anticipation dip
+            new Key(0.40f, -0.08f,  0.04f,  0.12f,  20f,  14f, -6f, 45f, Ease.IN_OUT), // draw back, elbow folds
+            new Key(0.48f, -0.10f,  0.05f,  0.16f,  24f,  16f, -8f, 50f, Ease.LINEAR), // coil
+            new Key(0.59f,  0.00f, -0.02f, -0.06f,   6f,  -6f,  4f,  5f, Ease.IN),     // snap: elbow straightens
+            new Key(0.74f,  0.00f, -0.10f, -0.10f, -18f, -10f,  6f,  0f, Ease.OUT),    // follow-through
+            new Key(1.00f,  0.00f,  0.00f,  0.00f,   0f,   0f,  0f, 30f, Ease.IN_OUT) // recover
     };
 
     private static final Key[] PULL_KEYS = {
-            new Key(0.00f,  0.00f,  0.00f,  0.00f,   0f,  0f,   0f, Ease.LINEAR),
-            new Key(0.30f,  0.05f,  0.12f,  0.45f,  28f,  0f, -12f, Ease.OUT),    // grab and heave
-            new Key(0.50f,  0.00f,  0.05f,  0.55f,  32f,  0f, -14f, Ease.LINEAR), // strain
-            new Key(0.70f, -0.05f, -0.05f,  0.00f,  -6f,  4f,   2f, Ease.IN),     // sword pops free
-            new Key(1.00f,  0.00f,  0.00f,  0.00f,   0f,  0f,   0f, Ease.IN_OUT)
+            new Key(0.00f,  0.00f,  0.00f,  0.00f,   0f, 0f,  0f, 30f, Ease.LINEAR),
+            new Key(0.30f,  0.02f,  0.04f,  0.18f,  12f, 0f, -6f, 60f, Ease.OUT),    // grab, draw in
+            new Key(0.50f,  0.00f,  0.02f,  0.24f,  16f, 0f, -8f, 70f, Ease.LINEAR), // strain
+            new Key(0.70f, -0.02f, -0.04f, -0.04f,   0f, 2f,  2f, 22f, Ease.IN),     // pops free
+            new Key(1.00f,  0.00f,  0.00f,  0.00f,   0f, 0f,  0f, 30f, Ease.IN_OUT)
     };
 
     private static final CamKey[] THROW_PITCH = {
@@ -59,7 +60,7 @@ public final class ThrowAnimation {
             new CamKey(0.70f, 5f, Ease.IN), new CamKey(1.00f, 0f, Ease.IN_OUT)
     };
 
-    private static final float[] ZERO = new float[6];
+    private static final float[] REST = {0, 0, 0, 0, 0, 0, REST_ELBOW};
 
     private static Type type = Type.NONE;
     private static int ticks, prevTicks;
@@ -114,9 +115,9 @@ public final class ThrowAnimation {
         return MathHelper.clamp(MathHelper.lerp(tickDelta, prevTicks, ticks) / length(), 0f, 1f);
     }
 
-    /** {tx, ty, tz, rotX, rotY, rotZ} for the current frame. */
+    /** {tx, ty, tz, shoulderPitch, yaw, roll, elbow} for the current frame. */
     public static float[] handPose(float tickDelta) {
-        if (type == Type.NONE) return ZERO;
+        if (type == Type.NONE) return REST;
         return samplePose(type == Type.THROW ? THROW_KEYS : PULL_KEYS, progress(tickDelta));
     }
 
@@ -149,11 +150,12 @@ public final class ThrowAnimation {
                 u = ease(b.ease, u);
                 return new float[] {
                         MathHelper.lerp(u, a.tx, b.tx), MathHelper.lerp(u, a.ty, b.ty), MathHelper.lerp(u, a.tz, b.tz),
-                        MathHelper.lerp(u, a.rx, b.rx), MathHelper.lerp(u, a.ry, b.ry), MathHelper.lerp(u, a.rz, b.rz)
+                        MathHelper.lerp(u, a.rx, b.rx), MathHelper.lerp(u, a.ry, b.ry), MathHelper.lerp(u, a.rz, b.rz),
+                        MathHelper.lerp(u, a.elbow, b.elbow)
                 };
             }
         }
-        return ZERO;
+        return REST;
     }
 
     private static float sampleCam(CamKey[] keys, float t) {
