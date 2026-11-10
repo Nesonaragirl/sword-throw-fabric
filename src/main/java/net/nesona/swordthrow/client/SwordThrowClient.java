@@ -26,19 +26,21 @@ public class SwordThrowClient implements ClientModInitializer {
         SwordThrowMod.clientPullHook = () -> ThrowAnimation.start(ThrowAnimation.Type.PULL);
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            ClientPlayerEntity p = client.player;
             while (throwKey.wasPressed()) {
-                ClientPlayerEntity p = client.player;
-                if (p == null) continue;
+                if (p == null || ThrowAnimation.type() != ThrowAnimation.Type.NONE) continue;
                 ItemStack s = p.getMainHandStack();
                 if (s.getItem() instanceof SwordItem && !p.getItemCooldownManager().isCoolingDown(s.getItem())) {
-                    ClientPlayNetworking.send(new ThrowPayload());
                     ThrowAnimation.start(ThrowAnimation.Type.THROW, s.copy());
                 }
             }
             ThrowAnimation.tick();
 
-            if (ThrowAnimation.released() && client.player != null && client.world != null) {
-                ClientPlayerEntity p = client.player;
+            if (ThrowAnimation.released() && p != null && client.world != null) {
+                // The sword leaves the hand now: tell the server and play the burst.
+                if (p.getMainHandStack().getItem() instanceof SwordItem) {
+                    ClientPlayNetworking.send(new ThrowPayload());
+                }
                 Vec3d look = p.getRotationVec(1.0f);
                 Vec3d pos = p.getEyePos().add(look.multiply(1.0)).add(0, -0.25, 0);
                 client.world.addParticle(ParticleTypes.SWEEP_ATTACK, pos.x, pos.y, pos.z, 0, 0, 0);
